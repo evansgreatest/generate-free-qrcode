@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
+import { Toaster } from "@/components/ui/toaster";
+import { ClerkProvider } from "@clerk/nextjs";
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -14,8 +16,22 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Generate QR Code",
-  description: "Generate QR Code for your website, social media, or any other purpose.",
+  title: "QR Pro Generator - Professional QR Code Generator",
+  description:
+    "Generate professional QR codes instantly for URLs, text, emails, and phone numbers. Fast, secure, and reliable.",
+  keywords: [
+    "QR code",
+    "QR code generator",
+    "QR",
+    "barcode",
+    "QR code creator",
+  ],
+  authors: [{ name: "QR Pro Generator" }],
+  openGraph: {
+    title: "QR Pro Generator",
+    description: "Generate professional QR codes instantly",
+    type: "website",
+  },
 };
 
 export default function RootLayout({
@@ -24,12 +40,20 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
-        {children}
-      </body>
-    </html>
+    <ClerkProvider
+      signInFallbackRedirectUrl="/"
+      signInForceRedirectUrl="/"
+      signUpFallbackRedirectUrl="/"
+      signUpForceRedirectUrl="/"
+    >
+      <html lang="en" suppressHydrationWarning>
+        <body
+          className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        >
+          {children}
+          <Toaster />
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }

@@ -12,6 +12,12 @@ export function generateQRCodeData(qrCodeData: QRCodeData): string {
       return `tel:${qrCodeData.data}`;
     case "SMS":
       return `sms:${qrCodeData.data}`;
+    case "WIFI":
+      // WiFi data is already formatted in the component
+      return qrCodeData.data;
+    case "LOCATION":
+      // Location data is already formatted in the component
+      return qrCodeData.data;
     default:
       return qrCodeData.data;
   }
