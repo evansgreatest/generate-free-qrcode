@@ -5,6 +5,10 @@ import { createAdminClient } from '@/lib/supabase/server';
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
 const PAYSTACK_PUBLIC_KEY = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY;
 
+// Pricing constants (must match client-side)
+const PRICE_PER_QR = 10.0;
+const PRICE_PER_PROFILE = 15.0;
+
 export async function POST(request: NextRequest) {
   try {
     const { userId } = await auth();
@@ -17,6 +21,33 @@ export async function POST(request: NextRequest) {
     }
 
     const { email, amount, metadata } = await request.json();
+
+    // Validate email format
+    if (!email || !email.includes("@") || !email.includes(".")) {
+      return NextResponse.json(
+        { error: "Invalid email address" },
+        { status: 400 }
+      );
+    }
+
+    // Validate amount based on QR type (CRITICAL SECURITY FIX)
+    const qrType = metadata?.qrType;
+    const expectedAmount = qrType === "PROFILE" ? PRICE_PER_PROFILE : PRICE_PER_QR;
+    
+    if (!amount || typeof amount !== "number" || amount <= 0) {
+      return NextResponse.json(
+        { error: "Invalid payment amount" },
+        { status: 400 }
+      );
+    }
+
+    // Allow small floating point differences (0.01 GHS tolerance)
+    if (Math.abs(amount - expectedAmount) > 0.01) {
+      return NextResponse.json(
+        { error: "Invalid payment amount for this QR code type" },
+        { status: 400 }
+      );
+    }
 
     if (!PAYSTACK_SECRET_KEY) {
       return NextResponse.json(

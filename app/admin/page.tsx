@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useUser, SignInButton, UserButton } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
+import useSWR from "swr";
 import {
   Card,
   CardContent,
@@ -56,13 +57,28 @@ interface StatsData {
   dailyRevenue: Record<string, number>;
 }
 
+// Fetcher function for SWR
+const fetcher = async (url: string) => {
+  const response = await fetch(url);
+
+  if (response.status === 403) {
+    const error = new Error("Access Denied");
+    (error as any).status = 403;
+    throw error;
+  }
+
+  if (!response.ok) {
+    const error = new Error("An error occurred while fetching the data.");
+    throw error;
+  }
+
+  return response.json();
+};
+
 export default function AdminDashboard() {
   const { user, isLoaded } = useUser();
   const router = useRouter();
   const { toast } = useToast();
-  const [salesData, setSalesData] = useState<SalesData | null>(null);
-  const [statsData, setStatsData] = useState<StatsData | null>(null);
-  const [loading, setLoading] = useState(true);
   const [dateRange, setDateRange] = useState({
     startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
       .toISOString()
@@ -70,69 +86,54 @@ export default function AdminDashboard() {
     endDate: new Date().toISOString().split("T")[0],
   });
 
-  useEffect(() => {
-    if (isLoaded && !user) {
-      return;
-    }
+  // Build sales API URL with date range
+  const salesUrl = user
+    ? `/api/admin/sales?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&limit=50`
+    : null;
 
-    if (user) {
-      fetchSalesData();
-      fetchStats();
-    }
-  }, [user, isLoaded, dateRange]);
-
-  const fetchSalesData = async () => {
-    try {
-      const params = new URLSearchParams({
-        startDate: dateRange.startDate,
-        endDate: dateRange.endDate,
-        limit: "50",
-      });
-
-      const response = await fetch(`/api/admin/sales?${params}`);
-
-      if (response.status === 403) {
+  // SWR hooks for data fetching
+  const {
+    data: salesData,
+    error: salesError,
+    isLoading: salesLoading,
+    mutate: mutateSales,
+  } = useSWR<SalesData>(salesUrl, fetcher, {
+    revalidateOnFocus: true,
+    revalidateOnReconnect: true,
+    refreshInterval: 0,
+    onError: (error: any) => {
+      if (error.status === 403) {
         toast({
           title: "Access Denied",
           description: "You don't have admin privileges",
           variant: "destructive",
         });
         router.push("/");
-        return;
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to load sales data",
+          variant: "destructive",
+        });
       }
+    },
+  });
 
-      if (!response.ok) {
-        throw new Error("Failed to fetch sales data");
-      }
-
-      const data = await response.json();
-      setSalesData(data);
-    } catch (error) {
-      console.error("Error fetching sales:", error);
-      toast({
-        title: "Error",
-        description: "Failed to load sales data",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchStats = async () => {
-    try {
-      const response = await fetch("/api/admin/stats");
-
-      if (!response.ok) {
-        throw new Error("Failed to fetch stats");
-      }
-
-      const data = await response.json();
-      setStatsData(data);
-    } catch (error) {
+  const {
+    data: statsData,
+    error: statsError,
+    isLoading: statsLoading,
+    mutate: mutateStats,
+  } = useSWR<StatsData>(user ? "/api/admin/stats" : null, fetcher, {
+    revalidateOnFocus: true,
+    revalidateOnReconnect: true,
+    refreshInterval: 0,
+    onError: (error) => {
       console.error("Error fetching stats:", error);
-    }
-  };
+    },
+  });
+
+  const loading = salesLoading || statsLoading;
 
   if (!isLoaded) {
     return (
@@ -256,9 +257,11 @@ export default function AdminDashboard() {
                   <input
                     type="date"
                     value={dateRange.startDate}
-                    onChange={(e) =>
-                      setDateRange({ ...dateRange, startDate: e.target.value })
-                    }
+                    onChange={(e) => {
+                      setDateRange({ ...dateRange, startDate: e.target.value });
+                      // Trigger revalidation when date range changes
+                      mutateSales();
+                    }}
                     className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:border-blue-500/50 focus:bg-white/10 focus:outline-none"
                   />
                 </div>
@@ -269,9 +272,11 @@ export default function AdminDashboard() {
                   <input
                     type="date"
                     value={dateRange.endDate}
-                    onChange={(e) =>
-                      setDateRange({ ...dateRange, endDate: e.target.value })
-                    }
+                    onChange={(e) => {
+                      setDateRange({ ...dateRange, endDate: e.target.value });
+                      // Trigger revalidation when date range changes
+                      mutateSales();
+                    }}
                     className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:border-blue-500/50 focus:bg-white/10 focus:outline-none"
                   />
                 </div>

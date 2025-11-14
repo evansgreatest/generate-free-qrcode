@@ -1,6 +1,7 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { getSessionId, verifyCSRFToken } from "./app/utils/csrf";
 
 // Rate limiting store (in-memory for free tier)
 const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
@@ -20,7 +21,11 @@ const RATE_LIMIT = {
 };
 
 function getRateLimitKey(request: NextRequest, type: string): string {
-  const ip = request.ip || request.headers.get("x-forwarded-for") || "unknown";
+  // Get IP from headers (NextRequest doesn't have .ip property)
+  const ip =
+    request.headers.get("x-forwarded-for") ||
+    request.headers.get("x-real-ip") ||
+    "unknown";
   const path = request.nextUrl.pathname;
   return `${type}:${ip}:${path}`;
 }
@@ -79,12 +84,53 @@ function checkRateLimit(
   };
 }
 
-// CSRF token validation
+// Request size limits (1MB for JSON, 10MB for file uploads)
+const MAX_BODY_SIZE = 1024 * 1024; // 1MB
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
+// Check request body size
+function checkRequestSize(request: NextRequest): {
+  valid: boolean;
+  size?: number;
+} {
+  const contentLength = request.headers.get("content-length");
+  if (!contentLength) {
+    return { valid: true };
+  }
+
+  const size = parseInt(contentLength, 10);
+  if (isNaN(size)) {
+    return { valid: true }; // Can't determine size, let it through
+  }
+
+  // Allow larger sizes for file uploads
+  const isFileUpload = request.headers
+    .get("content-type")
+    ?.includes("multipart/form-data");
+  const maxSize = isFileUpload ? MAX_FILE_SIZE : MAX_BODY_SIZE;
+
+  return {
+    valid: size <= maxSize,
+    size,
+  };
+}
+
+// Enhanced CSRF validation with token support
 function validateCSRF(request: NextRequest): boolean {
   if (request.method === "GET" || request.method === "HEAD") {
     return true; // GET requests don't need CSRF
   }
 
+  // Check for CSRF token in header (preferred)
+  const csrfToken = request.headers.get("x-csrf-token");
+  if (csrfToken) {
+    const sessionId = getSessionId(request);
+    if (verifyCSRFToken(sessionId, csrfToken)) {
+      return true;
+    }
+  }
+
+  // Fallback to origin/referer check
   const origin = request.headers.get("origin");
   const referer = request.headers.get("referer");
   const host = request.headers.get("host");
@@ -131,10 +177,19 @@ const isPublicAPI = createRouteMatcher([
 ]);
 
 export default clerkMiddleware(async (auth, request: NextRequest) => {
+  // Check request size
+  const sizeCheck = checkRequestSize(request);
+  if (!sizeCheck.valid) {
+    return NextResponse.json(
+      { error: "Request body too large" },
+      { status: 413 }
+    );
+  }
+
   // CSRF protection
   if (!validateCSRF(request)) {
     return NextResponse.json(
-      { error: "Invalid request origin" },
+      { error: "Invalid request origin or missing CSRF token" },
       { status: 403 }
     );
   }

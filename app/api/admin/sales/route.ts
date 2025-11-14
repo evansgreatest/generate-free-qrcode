@@ -1,25 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from '@clerk/nextjs/server';
 import { createAdminClient } from '@/lib/supabase/server';
+import { isAdmin } from '@/app/utils/rbac';
+import { logAuditEvent } from '@/app/utils/audit';
+import { getSafeErrorMessage, logError } from '@/app/utils/errors';
 
-// Admin user IDs - you should configure this based on your Clerk setup
-const ADMIN_USER_IDS = process.env.ADMIN_USER_IDS?.split(',') || [];
+// Request timeout (30 seconds)
+const REQUEST_TIMEOUT = 30000;
 
 export async function GET(request: NextRequest) {
+  const timeoutId = setTimeout(() => {}, REQUEST_TIMEOUT);
+
   try {
     const { userId } = await auth();
     
     if (!userId) {
+      clearTimeout(timeoutId);
       return NextResponse.json(
-        { error: "Unauthorized" },
+        { error: getSafeErrorMessage('Unauthorized', 'authentication') },
         { status: 401 }
       );
     }
 
-    // Check if user is admin
-    if (!ADMIN_USER_IDS.includes(userId)) {
+    // Check if user is admin using RBAC
+    const userIsAdmin = await isAdmin(userId);
+    if (!userIsAdmin) {
+      clearTimeout(timeoutId);
       return NextResponse.json(
-        { error: "Forbidden - Admin access required" },
+        { error: getSafeErrorMessage('Forbidden - Admin access required', 'authorization') },
         { status: 403 }
       );
     }
@@ -89,6 +97,16 @@ export async function GET(request: NextRequest) {
       pending: statsData?.filter(p => p.status === 'pending').length || 0,
     };
 
+    // Log audit event
+    await logAuditEvent({
+      user_id: userId,
+      action: 'admin.view_sales',
+      metadata: { startDate, endDate, limit, offset },
+      ip_address: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || undefined,
+      user_agent: request.headers.get('user-agent') || undefined,
+    });
+
+    clearTimeout(timeoutId);
     return NextResponse.json({
       payments,
       summary: {
@@ -104,9 +122,10 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error("Admin sales error:", error);
+    logError(error, 'ADMIN_SALES', { userId: (await auth()).userId });
+    clearTimeout(timeoutId);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: getSafeErrorMessage(error, 'database') },
       { status: 500 }
     );
   }

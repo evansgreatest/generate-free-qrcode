@@ -162,6 +162,16 @@ export default function HomeComp() {
       gradient: "from-teal-500 to-cyan-500",
       bgGradient: "from-teal-500/10 to-cyan-500/10",
     },
+    {
+      id: "PROFILE" as QRCodeType,
+      name: "Profile",
+      icon: Users,
+      description: "Contact profile card",
+      gradient: "from-rose-500 to-pink-500",
+      bgGradient: "from-rose-500/10 to-pink-500/10",
+      isSpecial: true,
+      badge: "Premium",
+    },
   ];
 
   const features = [
@@ -294,6 +304,13 @@ export default function HomeComp() {
               Fast, secure, and reliable.
             </span>
           </p>
+
+          <div className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-green-500/10 border border-green-500/20 rounded-full">
+            <CheckCircle2 className="h-4 w-4 text-green-400" />
+            <span className="text-sm font-semibold text-green-400">
+              Non-expiring QR codes - Generate once, use forever
+            </span>
+          </div>
         </div>
 
         {/* QR Type Selection */}
@@ -327,18 +344,21 @@ export default function HomeComp() {
                   )}
 
                   <div className="relative space-y-4">
-                    {/* <div
-                      className={`w-14 h-14 rounded-xl flex items-center justify-center transition-all ${
-                        isSelected
-                          ? `bg-gradient-to-r ${type.gradient} shadow-lg`
-                          : "bg-white/10 group-hover:bg-white/20"
-                      }`}
-                    >
-                      <Icon className="h-7 w-7 text-white" />
-                    </div> */}
+                    {type.isSpecial && (
+                      <div className="absolute top-2 right-2 z-10">
+                        <span className="px-2 py-1 text-xs font-bold bg-gradient-to-r from-rose-500 to-pink-500 text-white rounded-full shadow-lg">
+                          {type.badge}
+                        </span>
+                      </div>
+                    )}
 
                     <div className="text-left">
-                      <h4 className="text-lg font-bold mb-1">{type.name}</h4>
+                      <div className="flex items-center gap-2 mb-1">
+                        <h4 className="text-lg font-bold">{type.name}</h4>
+                        {type.isSpecial && (
+                          <Sparkles className="h-4 w-4 text-rose-400" />
+                        )}
+                      </div>
                       <p className="text-sm text-slate-400">
                         {type.description}
                       </p>

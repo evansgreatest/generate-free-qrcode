@@ -5,7 +5,8 @@ export type QRCodeType =
   | "PHONE"
   | "SMS"
   | "WIFI"
-  | "LOCATION";
+  | "LOCATION"
+  | "PROFILE";
 
 export interface QRCodeData {
   type: QRCodeType;
@@ -23,4 +24,20 @@ export interface LocationData {
   latitude: number;
   longitude: number;
   query?: string;
+}
+
+export interface ProfileData {
+  fullName: string;
+  phone: string;
+  email: string;
+  company?: string;
+  jobTitle?: string;
+  website?: string;
+  bio?: string;
+  profilePicture?: string;
+  linkedin?: string;
+  twitter?: string;
+  instagram?: string;
+  facebook?: string;
+  generateType?: "vcard" | "web" | "both";
 }
