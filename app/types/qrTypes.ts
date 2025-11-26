@@ -6,7 +6,8 @@ export type QRCodeType =
   | "SMS"
   | "WIFI"
   | "LOCATION"
-  | "PROFILE";
+  | "VCARD"
+  | "PDF";
 
 export interface QRCodeData {
   type: QRCodeType;
@@ -26,7 +27,7 @@ export interface LocationData {
   query?: string;
 }
 
-export interface ProfileData {
+export interface VCardData {
   fullName: string;
   phone: string;
   email: string;

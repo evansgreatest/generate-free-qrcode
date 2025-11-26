@@ -4,6 +4,8 @@ import { generateCSRFToken, getSessionId } from "@/app/utils/csrf";
 /**
  * GET /api/csrf-token
  * Generate and return a CSRF token for the current session
+ * Note: This route is automatically dynamic in Next.js 16 with Cache Components
+ * because it uses request.headers
  */
 export async function GET(request: NextRequest) {
   try {

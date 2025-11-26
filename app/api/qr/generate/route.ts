@@ -5,10 +5,16 @@ import QRCode from 'qrcode';
 import { v4 as uuidv4 } from 'uuid';
 import sharp from 'sharp';
 import { generateVCard } from '@/app/utils/vcardUtils';
-import { ProfileData } from '@/app/types/qrTypes';
+import { VCardData } from '@/app/types/qrTypes';
 import { sanitizeProfileData } from '@/app/utils/sanitize';
 import { getSafeErrorMessage, logError } from '@/app/utils/errors';
 import { logAuditEvent } from '@/app/utils/audit';
+import { revalidateTag } from 'next/cache';
+
+/**
+ * Note: This route is automatically dynamic in Next.js 16 with Cache Components
+ * because it uses auth() which accesses headers
+ */
 
 // Request timeout (30 seconds)
 const REQUEST_TIMEOUT = 30000;
@@ -47,42 +53,75 @@ export async function POST(request: NextRequest) {
     // Input validation (SECURITY FIX)
     // Validate qrData length to prevent DoS
     if (typeof qrData !== 'string' || qrData.length > 10000) {
+      clearTimeout(timeoutId);
       return NextResponse.json(
-        { error: 'QR data too long (max 10KB)' },
+        { error: getSafeErrorMessage('QR data too long (max 10KB)', 'validation') },
         { status: 400 }
       );
     }
 
     // Validate qrType
-    const validQrTypes = ['URL', 'TEXT', 'EMAIL', 'PHONE', 'SMS', 'WIFI', 'LOCATION', 'PROFILE'];
+    const validQrTypes = ['URL', 'TEXT', 'EMAIL', 'PHONE', 'SMS', 'WIFI', 'LOCATION', 'VCARD', 'PDF'];
     if (!validQrTypes.includes(qrType)) {
+      clearTimeout(timeoutId);
       return NextResponse.json(
-        { error: 'Invalid QR code type' },
+        { error: getSafeErrorMessage('Invalid QR code type', 'validation') },
         { status: 400 }
       );
+    }
+
+    // Validate PDF URL format if PDF type
+    if (qrType === 'PDF') {
+      if (!qrData || typeof qrData !== 'string' || qrData.trim() === '') {
+        clearTimeout(timeoutId);
+        return NextResponse.json(
+          { error: getSafeErrorMessage('PDF URL is required', 'validation') },
+          { status: 400 }
+        );
+      }
+      
+      try {
+        const pdfUrl = new URL(qrData);
+        // Ensure it's http or https
+        if (!['http:', 'https:'].includes(pdfUrl.protocol)) {
+          clearTimeout(timeoutId);
+          return NextResponse.json(
+            { error: getSafeErrorMessage('PDF URL must use http or https protocol', 'validation') },
+            { status: 400 }
+          );
+        }
+        // Accept any valid URL - Supabase storage URLs are valid
+      } catch (error) {
+        clearTimeout(timeoutId);
+        return NextResponse.json(
+          { error: getSafeErrorMessage('Invalid PDF URL format', 'validation') },
+          { status: 400 }
+        );
+      }
     }
 
     // Validate imageFormat
     if (imageFormat && !['png', 'jpeg'].includes(imageFormat)) {
+      clearTimeout(timeoutId);
       return NextResponse.json(
-        { error: 'Invalid image format' },
+        { error: getSafeErrorMessage('Invalid image format', 'validation') },
         { status: 400 }
       );
     }
 
-    // Handle PROFILE type - parse profile data and generate appropriate QR code
+    // Handle VCARD type - parse profile data and generate appropriate QR code
     let finalQrData = qrData;
     let profileSlug: string | null = null;
     let profileRecordId: string | null = null;
 
-    if (qrType === 'PROFILE') {
+    if (qrType === 'VCARD') {
       try {
-        let profileData: ProfileData = typeof qrData === 'string' 
+        let profileData: VCardData = typeof qrData === 'string' 
           ? JSON.parse(qrData) 
           : qrData;
 
         // Sanitize profile data (SECURITY FIX - XSS prevention)
-        profileData = sanitizeProfileData(profileData) as ProfileData;
+        profileData = sanitizeProfileData(profileData) as VCardData;
 
         // Validate profile data (SECURITY FIX)
         if (!profileData.fullName || !profileData.phone || !profileData.email) {
@@ -131,61 +170,87 @@ export async function POST(request: NextRequest) {
     }
 
     // Check for valid unused payment
-    const supabaseAdmin = createAdminClient();
+    // Create admin client once for reuse in payment check and storage operations
+    let supabaseAdmin: ReturnType<typeof createAdminClient>;
+    try {
+      supabaseAdmin = createAdminClient();
+    } catch (adminClientError) {
+      logError(adminClientError, 'SUPABASE_ADMIN_CLIENT', { userId });
+      clearTimeout(timeoutId);
+      return NextResponse.json(
+        { error: getSafeErrorMessage('Database connection error. Please try again.', 'database') },
+        { status: 500 }
+      );
+    }
+
     let paymentRef: string | null = null;
     
-    if (paymentReference) {
-      const { data: payment, error: paymentError } = await supabaseAdmin
-        .from('payments')
-        .select('*')
-        .eq('paystack_reference', paymentReference)
-        .eq('user_id', userId)
-        .eq('status', 'success')
-        .is('qr_code_id', null)
-        .maybeSingle();
+    try {
+      if (paymentReference) {
+        const { data: payment, error: paymentError } = await supabaseAdmin
+          .from('payments')
+          .select('*')
+          .eq('paystack_reference', paymentReference)
+          .eq('user_id', userId)
+          .eq('status', 'success')
+          .is('qr_code_id', null)
+          .maybeSingle();
 
-      if (paymentError) {
-        console.error('Payment check error:', paymentError);
-        return NextResponse.json(
-          { error: 'Error checking payment status. Please try again.' },
-          { status: 500 }
-        );
-      }
+        if (paymentError) {
+          logError(paymentError, 'PAYMENT_CHECK', { userId, paymentReference });
+          clearTimeout(timeoutId);
+          return NextResponse.json(
+            { error: getSafeErrorMessage('Error checking payment status. Please try again.', 'database') },
+            { status: 500 }
+          );
+        }
 
-      if (!payment) {
-        return NextResponse.json(
-          { error: 'No valid unused payment found for this reference. Please complete a new payment.' },
-          { status: 402 }
-        );
-      }
-      paymentRef = payment.paystack_reference;
-    } else {
-      // Check if user has any unused successful payment
-      const { data: unusedPayment, error: checkError } = await supabaseAdmin
-        .from('payments')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('status', 'success')
-        .is('qr_code_id', null)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        if (!payment) {
+          clearTimeout(timeoutId);
+          return NextResponse.json(
+            { error: 'No valid unused payment found for this reference. Please complete a new payment.' },
+            { status: 402 }
+          );
+        }
+        paymentRef = payment.paystack_reference;
+      } else {
+        // Check if user has any unused successful payment
+        const { data: unusedPayment, error: checkError } = await supabaseAdmin
+          .from('payments')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('status', 'success')
+          .is('qr_code_id', null)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-      if (checkError) {
-        console.error('Payment lookup error:', checkError);
-        return NextResponse.json(
-          { error: 'Error checking payment status. Please try again.' },
-          { status: 500 }
-        );
-      }
+        if (checkError) {
+          logError(checkError, 'PAYMENT_LOOKUP', { userId });
+          clearTimeout(timeoutId);
+          return NextResponse.json(
+            { error: getSafeErrorMessage('Error checking payment status. Please try again.', 'database') },
+            { status: 500 }
+          );
+        }
 
-      if (!unusedPayment) {
-        return NextResponse.json(
-          { error: 'Payment required. Please complete payment first.' },
-          { status: 402 }
-        );
+        if (!unusedPayment) {
+          clearTimeout(timeoutId);
+          return NextResponse.json(
+            { error: 'Payment required. Please complete payment first.' },
+            { status: 402 }
+          );
+        }
+        paymentRef = unusedPayment.paystack_reference;
       }
-      paymentRef = unusedPayment.paystack_reference;
+    } catch (paymentCheckError) {
+      // Handle network errors or Supabase connection issues
+      logError(paymentCheckError, 'PAYMENT_CHECK_NETWORK', { userId, paymentReference });
+      clearTimeout(timeoutId);
+      return NextResponse.json(
+        { error: getSafeErrorMessage('Unable to verify payment status. Please check your connection and try again.', 'network') },
+        { status: 500 }
+      );
     }
 
     // Generate QR code image (always as PNG first)
@@ -263,10 +328,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // If PROFILE type, save profile data to user_profiles table
-    if (qrType === 'PROFILE' && profileSlug) {
+    // If VCARD type, save profile data to user_profiles table
+    if (qrType === 'VCARD' && profileSlug) {
       try {
-        const profileData: ProfileData = typeof qrData === 'string' 
+        const profileData: VCardData = typeof qrData === 'string' 
           ? JSON.parse(qrData) 
           : qrData;
 
@@ -322,6 +387,32 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Invalidate cache for user's QR codes list (Next.js 16 - read-your-writes)
+    // Invalidate cache for user's QR codes and payments
+    // Using revalidateTag() for Route Handlers (updateTag is Server Actions-only)
+    if (userId) {
+      try {
+        // Revalidate user's QR codes cache
+        revalidateTag(`user-qr-codes:${userId}`, 'max');
+        // Revalidate user's payments cache
+        revalidateTag(`user-payments:${userId}`, 'max');
+      } catch (cacheError) {
+        // Cache invalidation is best-effort, don't fail the request
+        console.error('Cache invalidation error:', cacheError);
+      }
+    }
+
+    // Log audit event (userId is guaranteed to be string here due to early return check)
+    await logAuditEvent({
+      user_id: userId!, // Non-null assertion: userId is validated at line 23
+      action: 'qr.generate',
+      resource_type: 'qr_code',
+      resource_id: qrRecord.id,
+      metadata: { qr_type: qrType },
+      ip_address: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || undefined,
+      user_agent: request.headers.get('user-agent') || undefined,
+    });
+
     return NextResponse.json({
       success: true,
       qrCode: {
@@ -334,17 +425,6 @@ export async function POST(request: NextRequest) {
         slug: profileSlug,
         url: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/profile/${profileSlug}`,
       } : null,
-    });
-
-    // Log audit event (userId is guaranteed to be string here due to early return check)
-    await logAuditEvent({
-      user_id: userId!, // Non-null assertion: userId is validated at line 23
-      action: 'qr.generate',
-      resource_type: 'qr_code',
-      resource_id: qrRecord.id,
-      metadata: { qr_type: qrType },
-      ip_address: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || undefined,
-      user_agent: request.headers.get('user-agent') || undefined,
     });
 
     clearTimeout(timeoutId);

@@ -22,7 +22,8 @@ import {
 } from "@/components/ui/card";
 import { generateQRCodeData } from "../utils/qrUtils";
 import { generateVCard } from "../utils/vcardUtils";
-import { ProfileData } from "../types/qrTypes";
+import { VCardData } from "../types/qrTypes";
+import QRFormInputs from "./QRFormInputs";
 import {
   QrCode,
   Download,
@@ -52,6 +53,7 @@ import {
   Image as ImageIcon,
   ArrowRight,
   ArrowLeft,
+  Settings,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -87,22 +89,31 @@ export default function QRCodeGenerator({
   });
 
   // WiFi-specific state
-  const [wifiData, setWifiData] = useState({
+  const [wifiData, setWifiData] = useState<{
+    ssid: string;
+    password: string;
+    security: "WPA" | "WEP" | "nopass";
+    hidden: boolean;
+  }>({
     ssid: "",
     password: "",
-    security: "WPA" as "WPA" | "WEP" | "nopass",
+    security: "WPA",
     hidden: false,
   });
 
   // Location-specific state
-  const [locationData, setLocationData] = useState({
+  const [locationData, setLocationData] = useState<{
+    latitude: string;
+    longitude: string;
+    query: string;
+  }>({
     latitude: "",
     longitude: "",
     query: "",
   });
 
   // Profile-specific state
-  const [profileData, setProfileData] = useState<ProfileData>({
+  const [profileData, setProfileData] = useState<VCardData>({
     fullName: "",
     phone: "",
     email: "",
@@ -185,21 +196,27 @@ export default function QRCodeGenerator({
           )}`;
         }
         dataToGenerate = { type: "LOCATION", data: locationString };
-      } else if (storedData.selectedType === "PROFILE") {
+      } else if (storedData.selectedType === "VCARD") {
         // Handle profile generation - send profile data to API
         dataToGenerate = {
-          type: "PROFILE",
+          type: "VCARD",
           data: JSON.stringify(storedData.profileData),
         };
+      } else if (storedData.selectedType === "PDF") {
+        // PDF - use the URL from qrCodeData
+        dataToGenerate = storedData.qrCodeData;
       } else {
         dataToGenerate = storedData.qrCodeData;
       }
 
-      // For PROFILE, we send the JSON string directly to API
+      // For VCARD, we send the JSON string directly to API
       // The API will generate the appropriate QR data (vCard or web URL)
+      // For PDF, we send the URL directly
       const generatedData =
-        storedData.selectedType === "PROFILE"
+        storedData.selectedType === "VCARD"
           ? JSON.stringify(storedData.profileData)
+          : storedData.selectedType === "PDF"
+          ? storedData.qrCodeData.data // Send PDF URL directly
           : generateQRCodeData(dataToGenerate);
       const paymentRef = sessionStorage.getItem("payment_reference");
 
@@ -229,8 +246,8 @@ export default function QRCodeGenerator({
       sessionStorage.removeItem("payment_reference");
       sessionStorage.removeItem("has_paid");
 
-      // For PROFILE, use the actual QR data from API response
-      if (storedData.selectedType === "PROFILE") {
+      // For VCARD, use the actual QR data from API response
+      if (storedData.selectedType === "VCARD") {
         // Use the actual QR data from the API response
         // This will be either the vCard string or the web profile URL
         const actualQrData =
@@ -244,6 +261,9 @@ export default function QRCodeGenerator({
             description: `Your profile is available at: ${result.profile.url}`,
           });
         }
+      } else if (storedData.selectedType === "PDF") {
+        // For PDF, use the URL that was uploaded
+        setQrCode(storedData.qrCodeData.data);
       } else {
         setQrCode(generatedData);
       }
@@ -307,7 +327,7 @@ export default function QRCodeGenerator({
       });
     }
     // Reset Profile data when switching away from PROFILE type
-    if (selectedType !== "PROFILE") {
+    if (selectedType !== "VCARD") {
       setProfileData({
         fullName: "",
         phone: "",
@@ -427,7 +447,7 @@ export default function QRCodeGenerator({
     }
 
     // Validate PROFILE data
-    if (selectedType === "PROFILE") {
+    if (selectedType === "VCARD") {
       if (!profileData.fullName || !profileData.phone || !profileData.email) {
         toast({
           title: "Validation Error",
@@ -459,14 +479,23 @@ export default function QRCodeGenerator({
           locationString += `?q=${encodeURIComponent(locationData.query)}`;
         }
         dataToGenerate = { type: "LOCATION", data: locationString };
-      } else if (selectedType === "PROFILE") {
+      } else if (selectedType === "VCARD") {
         // Profile will be handled in API - send profile data
-        dataToGenerate = { type: "PROFILE", data: JSON.stringify(profileData) };
+        dataToGenerate = { type: "VCARD", data: JSON.stringify(profileData) };
+      } else if (selectedType === "PDF") {
+        // PDF - use the URL from qrCodeData
+        dataToGenerate = qrCodeData;
       } else {
         dataToGenerate = qrCodeData;
       }
 
-      const generatedData = generateQRCodeData(dataToGenerate);
+      // For PDF, send the URL directly (no transformation needed)
+      const generatedData =
+        selectedType === "PDF"
+          ? qrCodeData.data
+          : selectedType === "VCARD"
+          ? JSON.stringify(profileData)
+          : generateQRCodeData(dataToGenerate);
       const paymentRef = sessionStorage.getItem("payment_reference");
 
       const response = await fetch("/api/qr/generate", {
@@ -512,9 +541,9 @@ export default function QRCodeGenerator({
       sessionStorage.removeItem("payment_reference");
       sessionStorage.removeItem("has_paid");
 
-      // For PROFILE type, use the actual QR data from API response
+      // For VCARD type, use the actual QR data from API response
       // The API returns the final QR data (vCard string or web URL) in qrCode.qrData
-      if (selectedType === "PROFILE") {
+      if (selectedType === "VCARD") {
         // Use the actual QR data from the API response
         // This will be either the vCard string or the web profile URL
         const actualQrData =
@@ -528,6 +557,9 @@ export default function QRCodeGenerator({
             description: `Your profile is available at: ${result.profile.url}`,
           });
         }
+      } else if (selectedType === "PDF") {
+        // For PDF, use the URL that was uploaded
+        setQrCode(qrCodeData.data);
       } else {
         setQrCode(generatedData);
       }
@@ -548,7 +580,7 @@ export default function QRCodeGenerator({
       toast({
         title: "Success",
         description:
-          selectedType === "PROFILE" && result.profile
+          selectedType === "VCARD" && result.profile
             ? "Profile QR code generated successfully!"
             : "QR code generated and saved successfully! Payment consumed.",
       });
@@ -624,7 +656,7 @@ export default function QRCodeGenerator({
         },
         body: JSON.stringify({
           email,
-          amount: selectedType === "PROFILE" ? PRICE_PER_PROFILE : PRICE_PER_QR,
+          amount: selectedType === "VCARD" ? PRICE_PER_PROFILE : PRICE_PER_QR,
           metadata: {
             qrType: selectedType,
             custom_fields: [
@@ -694,600 +726,26 @@ export default function QRCodeGenerator({
 
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="space-y-3">
-              <label className="text-sm font-semibold text-slate-300 flex items-center gap-2">
-                {/* <Sparkles className="h-4 w-4 text-blue-400" /> */}
-                {selectedType === "URL" && "Website URL"}
-                {selectedType === "TEXT" && "Text Content"}
-                {selectedType === "EMAIL" && "Email Address"}
-                {selectedType === "PHONE" && "Phone Number"}
-                {selectedType === "WIFI" && "WiFi Network"}
-                {selectedType === "LOCATION" && "GPS Location"}
-                {selectedType === "PROFILE" && "Contact Profile"}
-              </label>
-              {selectedType === "URL" && (
-                <Input
-                  type="url"
-                  placeholder="https://example.com"
-                  value={qrCodeData.data}
-                  onChange={handleInputChange}
-                  required
-                  className="h-12 bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-blue-500/50 focus:bg-white/10"
-                />
-              )}
-              {selectedType === "TEXT" && (
-                <Textarea
-                  placeholder="Enter your text here..."
-                  value={qrCodeData.data}
-                  onChange={handleInputChange}
-                  required
-                  rows={4}
-                  className="resize-none bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-blue-500/50 focus:bg-white/10"
-                />
-              )}
-              {selectedType === "EMAIL" && (
-                <Input
-                  type="email"
-                  placeholder="example@email.com"
-                  value={qrCodeData.data}
-                  onChange={handleInputChange}
-                  required
-                  className="h-12 bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-blue-500/50 focus:bg-white/10"
-                />
-              )}
-              {selectedType === "PHONE" && (
-                <Input
-                  type="tel"
-                  placeholder="+233 XX XXX XXXX"
-                  value={qrCodeData.data}
-                  onChange={handleInputChange}
-                  required
-                  className="h-12 bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-blue-500/50 focus:bg-white/10"
-                />
-              )}
-              {selectedType === "WIFI" && (
-                <div className="space-y-3">
-                  <Input
-                    type="text"
-                    placeholder="Network Name (SSID)"
-                    value={wifiData.ssid}
-                    onChange={(e) =>
-                      setWifiData({ ...wifiData, ssid: e.target.value })
-                    }
-                    required
-                    className="h-12 bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-blue-500/50 focus:bg-white/10"
-                  />
-                  <Input
-                    type="password"
-                    placeholder={
-                      wifiData.security === "nopass"
-                        ? "No password needed"
-                        : "Password"
-                    }
-                    value={wifiData.password}
-                    onChange={(e) =>
-                      setWifiData({ ...wifiData, password: e.target.value })
-                    }
-                    disabled={wifiData.security === "nopass"}
-                    className="h-12 bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-blue-500/50 focus:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
-                  />
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2">
-                      <Label className="text-xs text-slate-400">
-                        Security:
-                      </Label>
-                      <Select
-                        value={wifiData.security}
-                        onValueChange={(value) => {
-                          const newSecurity = value as "WPA" | "WEP" | "nopass";
-                          setWifiData({
-                            ...wifiData,
-                            security: newSecurity,
-                            password:
-                              newSecurity === "nopass" ? "" : wifiData.password,
-                          });
-                        }}
-                      >
-                        <SelectTrigger className="w-full h-12 bg-white/5 border border-white/10 text-white placeholder-slate-500 ">
-                          <SelectValue placeholder="Select Security" />
-                        </SelectTrigger>
-                        <SelectContent className="bg-white border-white/10">
-                          <SelectItem value="WPA">WPA/WPA2</SelectItem>
-                          <SelectItem value="WEP">WEP</SelectItem>
-                          <SelectItem value="nopass">No Password</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        id="hidden"
-                        checked={wifiData.hidden}
-                        onChange={(e) =>
-                          setWifiData({ ...wifiData, hidden: e.target.checked })
-                        }
-                        className="w-4 h-4 rounded bg-white/5 border-white/10 text-primary focus:ring-primary"
-                      />
-                      <label
-                        htmlFor="hidden"
-                        className="text-xs text-slate-400"
-                      >
-                        Hidden Network
-                      </label>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {selectedType === "LOCATION" && (
-                <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <Input
-                      type="number"
-                      step="any"
-                      placeholder="Latitude"
-                      value={locationData.latitude}
-                      onChange={(e) =>
-                        setLocationData({
-                          ...locationData,
-                          latitude: e.target.value,
-                        })
-                      }
-                      required
-                      className="h-12 bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-blue-500/50 focus:bg-white/10"
-                    />
-                    <Input
-                      type="number"
-                      step="any"
-                      placeholder="Longitude"
-                      value={locationData.longitude}
-                      onChange={(e) =>
-                        setLocationData({
-                          ...locationData,
-                          longitude: e.target.value,
-                        })
-                      }
-                      required
-                      className="h-12 bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-blue-500/50 focus:bg-white/10"
-                    />
-                  </div>
-                  <Input
-                    type="text"
-                    placeholder="Location Name (Optional)"
-                    value={locationData.query}
-                    onChange={(e) =>
-                      setLocationData({
-                        ...locationData,
-                        query: e.target.value,
-                      })
-                    }
-                    className="h-12 bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-blue-500/50 focus:bg-white/10"
-                  />
-                </div>
-              )}
-              {selectedType === "PROFILE" && (
-                <div className="space-y-6">
-                  {/* Stepper Progress */}
-                  <div className="flex items-center justify-between mb-6">
-                    {[1, 2, 3, 4].map((step) => (
-                      <div key={step} className="flex items-center flex-1">
-                        <div className="flex flex-col items-center flex-1">
-                          <div
-                            className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all ${
-                              profileStep === step
-                                ? "bg-primary border-primary text-white"
-                                : profileStep > step
-                                ? "bg-green-500 border-green-500 text-white"
-                                : "bg-white/5 border-white/20 text-slate-400"
-                            }`}
-                          >
-                            {profileStep > step ? (
-                              <Check className="h-5 w-5" />
-                            ) : (
-                              <span className="font-bold">{step}</span>
-                            )}
-                          </div>
-                          <span
-                            className={`text-xs mt-2 ${
-                              profileStep >= step
-                                ? "text-white"
-                                : "text-slate-500"
-                            }`}
-                          >
-                            {step === 1 && "Basic Info"}
-                            {step === 2 && "Professional"}
-                            {step === 3 && "Social Media"}
-                            {step === 4 && "Settings"}
-                          </span>
-                        </div>
-                        {step < 4 && (
-                          <div
-                            className={`h-0.5 flex-1 mx-2 ${
-                              profileStep > step
-                                ? "bg-green-500"
-                                : "bg-white/10"
-                            }`}
-                          />
-                        )}
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Step 1: Basic Information */}
-                  {profileStep === 1 && (
-                    <div className="space-y-4 animate-fade-in">
-                      <div className="flex items-center gap-2 mb-4">
-                        <User className="h-5 w-5 text-primary" />
-                        <h3 className="text-lg font-bold">Basic Information</h3>
-                      </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label className="text-sm text-slate-300 flex items-center gap-1">
-                            <User className="h-4 w-4" />
-                            Full Name *
-                          </Label>
-                          <Input
-                            type="text"
-                            placeholder="John Doe"
-                            value={profileData.fullName}
-                            onChange={(e) =>
-                              setProfileData({
-                                ...profileData,
-                                fullName: e.target.value,
-                              })
-                            }
-                            required
-                            className="h-12 bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-blue-500/50 focus:bg-white/10"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label className="text-sm text-slate-300 flex items-center gap-1">
-                            <PhoneIcon className="h-4 w-4" />
-                            Phone Number *
-                          </Label>
-                          <Input
-                            type="tel"
-                            placeholder="+233 XX XXX XXXX"
-                            value={profileData.phone}
-                            onChange={(e) =>
-                              setProfileData({
-                                ...profileData,
-                                phone: e.target.value,
-                              })
-                            }
-                            required
-                            className="h-12 bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-blue-500/50 focus:bg-white/10"
-                          />
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-sm text-slate-300 flex items-center gap-1">
-                          <MailIcon className="h-4 w-4" />
-                          Email Address *
-                        </Label>
-                        <Input
-                          type="email"
-                          placeholder="john@example.com"
-                          value={profileData.email}
-                          onChange={(e) =>
-                            setProfileData({
-                              ...profileData,
-                              email: e.target.value,
-                            })
-                          }
-                          required
-                          className="h-12 bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-blue-500/50 focus:bg-white/10"
-                        />
-                      </div>
-                      <div className="flex justify-end pt-4">
-                        <Button
-                          type="button"
-                          onClick={() => {
-                            if (
-                              profileData.fullName &&
-                              profileData.phone &&
-                              profileData.email
-                            ) {
-                              setProfileStep(2);
-                            } else {
-                              toast({
-                                title: "Validation Error",
-                                description:
-                                  "Please fill in all required fields",
-                                variant: "destructive",
-                              });
-                            }
-                          }}
-                          className="bg-primary hover:bg-primary/80"
-                        >
-                          Next <ArrowRight className="ml-2 h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Step 2: Professional Information */}
-                  {profileStep === 2 && (
-                    <div className="space-y-4 animate-fade-in">
-                      <div className="flex items-center gap-2 mb-4">
-                        <Briefcase className="h-5 w-5 text-primary" />
-                        <h3 className="text-lg font-bold">
-                          Professional Information
-                        </h3>
-                      </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label className="text-sm text-slate-300 flex items-center gap-1">
-                            <Building className="h-4 w-4" />
-                            Company
-                          </Label>
-                          <Input
-                            type="text"
-                            placeholder="Company Name"
-                            value={profileData.company || ""}
-                            onChange={(e) =>
-                              setProfileData({
-                                ...profileData,
-                                company: e.target.value,
-                              })
-                            }
-                            className="h-12 bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-blue-500/50 focus:bg-white/10"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label className="text-sm text-slate-300 flex items-center gap-1">
-                            <Briefcase className="h-4 w-4" />
-                            Job Title
-                          </Label>
-                          <Input
-                            type="text"
-                            placeholder="Job Title"
-                            value={profileData.jobTitle || ""}
-                            onChange={(e) =>
-                              setProfileData({
-                                ...profileData,
-                                jobTitle: e.target.value,
-                              })
-                            }
-                            className="h-12 bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-blue-500/50 focus:bg-white/10"
-                          />
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-sm text-slate-300 flex items-center gap-1">
-                          <Globe className="h-4 w-4" />
-                          Website
-                        </Label>
-                        <Input
-                          type="url"
-                          placeholder="https://example.com"
-                          value={profileData.website || ""}
-                          onChange={(e) =>
-                            setProfileData({
-                              ...profileData,
-                              website: e.target.value,
-                            })
-                          }
-                          className="h-12 bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-blue-500/50 focus:bg-white/10"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-sm text-slate-300 flex items-center gap-1">
-                          <ImageIcon className="h-4 w-4" />
-                          Profile Picture URL
-                        </Label>
-                        <Input
-                          type="url"
-                          placeholder="https://example.com/photo.jpg"
-                          value={profileData.profilePicture || ""}
-                          onChange={(e) =>
-                            setProfileData({
-                              ...profileData,
-                              profilePicture: e.target.value,
-                            })
-                          }
-                          className="h-12 bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-blue-500/50 focus:bg-white/10"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-sm text-slate-300">
-                          Bio/About
-                        </Label>
-                        <Textarea
-                          placeholder="Tell us about yourself..."
-                          value={profileData.bio || ""}
-                          onChange={(e) =>
-                            setProfileData({
-                              ...profileData,
-                              bio: e.target.value,
-                            })
-                          }
-                          rows={4}
-                          className="resize-none bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-blue-500/50 focus:bg-white/10"
-                        />
-                      </div>
-                      <div className="flex justify-between pt-4">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setProfileStep(1)}
-                          className="bg-white/5 border-white/10 text-white hover:bg-white/10"
-                        >
-                          <ArrowLeft className="mr-2 h-4 w-4" /> Previous
-                        </Button>
-                        <Button
-                          type="button"
-                          onClick={() => setProfileStep(3)}
-                          className="bg-primary hover:bg-primary/80"
-                        >
-                          Next <ArrowRight className="ml-2 h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Step 3: Social Media */}
-                  {profileStep === 3 && (
-                    <div className="space-y-4 animate-fade-in">
-                      <div className="flex items-center gap-2 mb-4">
-                        <Sparkles className="h-5 w-5 text-primary" />
-                        <h3 className="text-lg font-bold">Social Media</h3>
-                      </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label className="text-sm text-slate-300 flex items-center gap-1">
-                            <Linkedin className="h-4 w-4" />
-                            LinkedIn
-                          </Label>
-                          <Input
-                            type="text"
-                            placeholder="linkedin.com/in/username or @username"
-                            value={profileData.linkedin || ""}
-                            onChange={(e) =>
-                              setProfileData({
-                                ...profileData,
-                                linkedin: e.target.value,
-                              })
-                            }
-                            className="h-12 bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-blue-500/50 focus:bg-white/10"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label className="text-sm text-slate-300 flex items-center gap-1">
-                            <Twitter className="h-4 w-4" />
-                            Twitter
-                          </Label>
-                          <Input
-                            type="text"
-                            placeholder="@username or twitter.com/username"
-                            value={profileData.twitter || ""}
-                            onChange={(e) =>
-                              setProfileData({
-                                ...profileData,
-                                twitter: e.target.value,
-                              })
-                            }
-                            className="h-12 bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-blue-500/50 focus:bg-white/10"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label className="text-sm text-slate-300 flex items-center gap-1">
-                            <Instagram className="h-4 w-4" />
-                            Instagram
-                          </Label>
-                          <Input
-                            type="text"
-                            placeholder="@username or instagram.com/username"
-                            value={profileData.instagram || ""}
-                            onChange={(e) =>
-                              setProfileData({
-                                ...profileData,
-                                instagram: e.target.value,
-                              })
-                            }
-                            className="h-12 bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-blue-500/50 focus:bg-white/10"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label className="text-sm text-slate-300 flex items-center gap-1">
-                            <Facebook className="h-4 w-4" />
-                            Facebook
-                          </Label>
-                          <Input
-                            type="text"
-                            placeholder="facebook.com/username"
-                            value={profileData.facebook || ""}
-                            onChange={(e) =>
-                              setProfileData({
-                                ...profileData,
-                                facebook: e.target.value,
-                              })
-                            }
-                            className="h-12 bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-blue-500/50 focus:bg-white/10"
-                          />
-                        </div>
-                      </div>
-                      <div className="flex justify-between pt-4">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setProfileStep(2)}
-                          className="bg-white/5 border-white/10 text-white hover:bg-white/10"
-                        >
-                          <ArrowLeft className="mr-2 h-4 w-4" /> Previous
-                        </Button>
-                        <Button
-                          type="button"
-                          onClick={() => setProfileStep(4)}
-                          className="bg-primary hover:bg-primary/80"
-                        >
-                          Next <ArrowRight className="ml-2 h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Step 4: QR Code Settings */}
-                  {profileStep === 4 && (
-                    <div className="space-y-4 animate-fade-in">
-                      <div className="flex items-center gap-2 mb-4">
-                        <QrCode className="h-5 w-5 text-primary" />
-                        <h3 className="text-lg font-bold">QR Code Settings</h3>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-sm text-slate-300">
-                          QR Code Type
-                        </Label>
-                        <Select
-                          value={profileData.generateType || "both"}
-                          onValueChange={(value) =>
-                            setProfileData({
-                              ...profileData,
-                              generateType: value as "vcard" | "web" | "both",
-                            })
-                          }
-                        >
-                          <SelectTrigger className="h-12 bg-white/5 border border-white/10 text-white">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent className="bg-slate-800 border-white/10">
-                            <SelectItem value="both">
-                              Both (vCard + Web Profile)
-                            </SelectItem>
-                            <SelectItem value="vcard">
-                              vCard Only (Contact Import)
-                            </SelectItem>
-                            <SelectItem value="web">
-                              Web Profile Only
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <p className="text-xs text-slate-400 mt-2">
-                          Choose how your profile QR code will work. "Both"
-                          creates a web profile page with vCard download option.
-                        </p>
-                      </div>
-                      <div className="flex justify-between pt-4">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setProfileStep(3)}
-                          className="bg-white/5 border-white/10 text-white hover:bg-white/10"
-                        >
-                          <ArrowLeft className="mr-2 h-4 w-4" /> Previous
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+            <QRFormInputs
+              selectedType={selectedType}
+              qrCodeData={qrCodeData}
+              wifiData={wifiData}
+              locationData={locationData}
+              profileData={profileData}
+              profileStep={profileStep}
+              onQRCodeDataChange={setQRCodeData}
+              onWifiDataChange={setWifiData}
+              onLocationDataChange={setLocationData}
+              onProfileDataChange={setProfileData}
+              onProfileStepChange={setProfileStep}
+            />
 
             {!hasPaid && (
               <div className="relative group">
                 {/* <div className="absolute inset-0 bg-gradient-to-r from-orange-500/20 to-amber-500/20 rounded-xl blur-md" /> */}
                 <div
                   className={`relative p-4 rounded-xl border ${
-                    selectedType === "PROFILE"
+                    selectedType === "VCARD"
                       ? "bg-gradient-to-r from-rose-500/10 to-pink-500/10 border-rose-500/20"
                       : "bg-gradient-to-r from-orange-500/10 to-amber-500/10 border-orange-500/20"
                   }`}
@@ -1295,14 +753,14 @@ export default function QRCodeGenerator({
                   <div className="flex items-center gap-3">
                     <div
                       className={`p-2 rounded-lg ${
-                        selectedType === "PROFILE"
+                        selectedType === "VCARD"
                           ? "bg-rose-500/20"
                           : "bg-orange-500/20"
                       }`}
                     >
                       <CreditCard
                         className={`h-5 w-5 ${
-                          selectedType === "PROFILE"
+                          selectedType === "VCARD"
                             ? "text-rose-400"
                             : "text-orange-400"
                         }`}
@@ -1311,13 +769,13 @@ export default function QRCodeGenerator({
                     <div>
                       <p
                         className={`text-sm font-semibold ${
-                          selectedType === "PROFILE"
+                          selectedType === "VCARD"
                             ? "text-rose-300"
                             : "text-orange-300"
                         }`}
                       >
                         Payment Required
-                        {selectedType === "PROFILE" && (
+                        {selectedType === "VCARD" && (
                           <span className="ml-2 px-2 py-0.5 text-xs bg-rose-500/20 border border-rose-500/30 rounded-full">
                             Premium
                           </span>
@@ -1325,13 +783,13 @@ export default function QRCodeGenerator({
                       </p>
                       <p
                         className={`text-xs ${
-                          selectedType === "PROFILE"
+                          selectedType === "VCARD"
                             ? "text-rose-400/80"
                             : "text-orange-400/80"
                         }`}
                       >
                         GHS{" "}
-                        {selectedType === "PROFILE"
+                        {selectedType === "VCARD"
                           ? PRICE_PER_PROFILE
                           : PRICE_PER_QR}{" "}
                         per QR code generation
@@ -1410,8 +868,8 @@ export default function QRCodeGenerator({
           <DialogHeader>
             <div className="flex items-center gap-3 mb-2">
               <div className="relative">
-                <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-lg blur-md opacity-75" />
-                <div className="relative p-2 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-lg">
+                <div className="absolute inset-0 bg-primary rounded-lg blur-md opacity-75" />
+                <div className="relative p-2 bg-primary rounded-lg">
                   <CreditCard className="h-5 w-5 text-white" />
                 </div>
               </div>
@@ -1421,13 +879,13 @@ export default function QRCodeGenerator({
               To generate a QR code, please complete the payment of{" "}
               <span
                 className={`font-bold ${
-                  selectedType === "PROFILE" ? "text-rose-400" : "text-blue-400"
+                  selectedType === "VCARD" ? "text-rose-400" : "text-blue-400"
                 }`}
               >
                 GHS{" "}
-                {selectedType === "PROFILE" ? PRICE_PER_PROFILE : PRICE_PER_QR}
+                {selectedType === "VCARD" ? PRICE_PER_PROFILE : PRICE_PER_QR}
               </span>
-              {selectedType === "PROFILE" && (
+              {selectedType === "VCARD" && (
                 <span className="ml-2 px-2 py-0.5 text-xs bg-rose-500/20 border border-rose-500/30 rounded-full text-rose-300">
                   Premium Feature
                 </span>
@@ -1444,7 +902,7 @@ export default function QRCodeGenerator({
             </Button>
             <Button
               onClick={handlePaymentClick}
-              className="flex-1 bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 shadow-xl shadow-blue-500/30"
+              className="flex-1 bg-primary hover:bg-primary/80  transition-all"
             >
               <CreditCard className="mr-2 h-4 w-4" />
               Continue to Payment
@@ -1459,8 +917,8 @@ export default function QRCodeGenerator({
           <DialogHeader>
             <div className="flex items-center gap-3 mb-2">
               <div className="relative">
-                <div className="absolute inset-0 bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg blur-md opacity-75" />
-                <div className="relative p-2 bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg">
+                <div className="absolute inset-0 bg-primary rounded-lg blur-md opacity-75" />
+                <div className="relative p-2 bg-primary rounded-lg">
                   <Mail className="h-5 w-5 text-white" />
                 </div>
               </div>
@@ -1504,7 +962,7 @@ export default function QRCodeGenerator({
               </Button>
               <Button
                 type="submit"
-                className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 shadow-xl shadow-purple-500/30"
+                className="flex-1 bg-primary hover:bg-primary/80  transition-all"
                 disabled={isProcessingPayment}
               >
                 {isProcessingPayment ? (

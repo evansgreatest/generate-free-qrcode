@@ -5,6 +5,11 @@ import { isAdmin } from '@/app/utils/rbac';
 import { logAuditEvent } from '@/app/utils/audit';
 import { getSafeErrorMessage, logError } from '@/app/utils/errors';
 
+/**
+ * Note: This route is automatically dynamic in Next.js 16 with Cache Components
+ * because it uses auth() which accesses headers
+ */
+
 // Request timeout (30 seconds)
 const REQUEST_TIMEOUT = 30000;
 
@@ -79,14 +84,20 @@ export async function GET(request: NextRequest) {
       user_agent: request.headers.get('user-agent') || undefined,
     });
 
-    clearTimeout(timeoutId);
-    return NextResponse.json({
+    const response = NextResponse.json({
       totalQRCodes: totalQRCodes || 0,
       totalUsers: uniqueUsers,
       totalRevenue,
       dailyRevenue,
       recentPayments: revenueData?.slice(-10).reverse() || [],
     });
+
+    // Add cache tag for Next.js 16 cache management
+    response.headers.set('x-cache-tag', 'admin-stats');
+    response.headers.set('Cache-Control', 'private, s-maxage=60, stale-while-revalidate=300');
+
+    clearTimeout(timeoutId);
+    return response;
   } catch (error) {
     logError(error, 'ADMIN_STATS', { userId: (await auth()).userId });
     clearTimeout(timeoutId);

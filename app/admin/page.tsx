@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useUser, SignInButton, UserButton } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
@@ -79,17 +79,29 @@ export default function AdminDashboard() {
   const { user, isLoaded } = useUser();
   const router = useRouter();
   const { toast } = useToast();
-  const [dateRange, setDateRange] = useState({
-    startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .split("T")[0],
-    endDate: new Date().toISOString().split("T")[0],
+  const [dateRange, setDateRange] = useState<{
+    startDate: string;
+    endDate: string;
+  }>({
+    startDate: "",
+    endDate: "",
   });
 
-  // Build sales API URL with date range
-  const salesUrl = user
-    ? `/api/admin/sales?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&limit=50`
-    : null;
+  // Initialize date range in useEffect to avoid Date.now() during prerender (Next.js 16)
+  useEffect(() => {
+    setDateRange({
+      startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .split("T")[0],
+      endDate: new Date().toISOString().split("T")[0],
+    });
+  }, []);
+
+  // Build sales API URL with date range (only when dates are initialized)
+  const salesUrl =
+    user && dateRange.startDate && dateRange.endDate
+      ? `/api/admin/sales?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&limit=50`
+      : null;
 
   // SWR hooks for data fetching
   const {

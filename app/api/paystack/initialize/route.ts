@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from '@clerk/nextjs/server';
 import { createAdminClient } from '@/lib/supabase/server';
 
+/**
+ * Note: This route is automatically dynamic in Next.js 16 with Cache Components
+ * because it uses auth() which accesses headers
+ */
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
 const PAYSTACK_PUBLIC_KEY = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY;
 

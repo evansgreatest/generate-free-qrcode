@@ -1,10 +1,10 @@
-import { ProfileData } from "../types/qrTypes";
+import { VCardData } from "../types/qrTypes";
 
 /**
  * Generates a vCard (Virtual Contact File) string from profile data
  * vCard format is widely supported by contact apps and QR code scanners
  */
-export function generateVCard(profileData: ProfileData): string {
+export function generateVCard(profileData: VCardData): string {
   const lines: string[] = [];
 
   // vCard header

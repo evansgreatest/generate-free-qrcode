@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from '@clerk/nextjs/server';
 import { createAdminClient } from '@/lib/supabase/server';
 
+/**
+ * Note: This route is automatically dynamic in Next.js 16 with Cache Components
+ * because it uses auth() which accesses headers
+ */
 export async function GET(request: NextRequest) {
   try {
     const { userId } = await auth();
@@ -40,12 +44,21 @@ export async function GET(request: NextRequest) {
       .select('*', { count: 'exact', head: true })
       .eq('user_id', userId);
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       payments: payments || [],
       total: count || 0,
       limit,
       offset,
     });
+
+    // Add cache tags for Next.js 16 cache management
+    response.headers.set('Cache-Control', 'private, no-cache');
+    // Tag for cache invalidation
+    if (userId) {
+      response.headers.set('x-cache-tag', `user-payments:${userId}`);
+    }
+
+    return response;
   } catch (error) {
     console.error("User payments error:", error);
     return NextResponse.json(

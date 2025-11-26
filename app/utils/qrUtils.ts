@@ -18,8 +18,11 @@ export function generateQRCodeData(qrCodeData: QRCodeData): string {
     case "LOCATION":
       // Location data is already formatted in the component
       return qrCodeData.data;
-    case "PROFILE":
-      // Profile data is handled in API - return as is
+    case "VCARD":
+      // VCard data is handled in API - return as is
+      return qrCodeData.data;
+    case "PDF":
+      // PDF URL - validate and return as is
       return qrCodeData.data;
     default:
       return qrCodeData.data;

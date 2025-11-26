@@ -27,7 +27,7 @@ import {
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { generateVCard } from "@/app/utils/vcardUtils";
-import { ProfileData } from "@/app/types/qrTypes";
+import { VCardData } from "@/app/types/qrTypes";
 
 interface Profile {
   id: string;
@@ -90,7 +90,7 @@ export default function ProfilePage() {
   const handleDownloadVCard = () => {
     if (!profile) return;
 
-    const profileData: ProfileData = {
+    const profileData: VCardData = {
       fullName: profile.full_name,
       phone: profile.phone,
       email: profile.email,
